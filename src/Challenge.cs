@@ -1,16 +1,7 @@
-// DESAFIO: Integração com Sistema Legado de Pagamentos
-// PROBLEMA: Um e-commerce moderno precisa integrar com um sistema legado de processamento
-// de pagamentos que usa interfaces e estruturas de dados incompatíveis com o sistema atual
-// O código atual não consegue usar o sistema legado sem grandes mudanças na aplicação
-
 using System;
 
 namespace DesignPatternChallenge
 {
-    // Contexto: Sistema moderno de e-commerce com interface padronizada
-    // Precisa integrar com sistema legado que tem interface completamente diferente
-    
-    // Interface moderna que a aplicação usa
     public interface IPaymentProcessor
     {
         PaymentResult ProcessPayment(PaymentRequest request);
@@ -43,10 +34,8 @@ namespace DesignPatternChallenge
         Refunded
     }
 
-    // Sistema legado com interface completamente diferente
     public class LegacyPaymentSystem
     {
-        // Métodos com assinaturas incompatíveis
         public LegacyTransactionResponse AuthorizeTransaction(
             string cardNum,
             int cvvCode,
@@ -58,17 +47,14 @@ namespace DesignPatternChallenge
             Console.WriteLine($"[Sistema Legado] Autorizando transação...");
             Console.WriteLine($"Cartão: {cardNum}");
             Console.WriteLine($"Valor: {amountInCents / 100:C}");
-            
-            // Simulação de processamento
-            var response = new LegacyTransactionResponse
+
+            return new LegacyTransactionResponse
             {
                 AuthCode = Guid.NewGuid().ToString().Substring(0, 8).ToUpper(),
                 ResponseCode = "00",
                 ResponseMessage = "TRANSACTION APPROVED",
                 TransactionRef = $"LEG{DateTime.Now.Ticks}"
             };
-
-            return response;
         }
 
         public bool ReverseTransaction(string transRef, double amountInCents)
@@ -93,12 +79,68 @@ namespace DesignPatternChallenge
         public string TransactionRef { get; set; }
     }
 
-    // Implementação moderna que funciona bem
+    public class LegacyPaymentAdapter : IPaymentProcessor
+    {
+        private readonly LegacyPaymentSystem _legacySystem;
+
+        public LegacyPaymentAdapter(LegacyPaymentSystem legacySystem)
+        {
+            _legacySystem = legacySystem;
+        }
+
+        public PaymentResult ProcessPayment(PaymentRequest request)
+        {
+            Console.WriteLine("[Adapter] Convertendo requisição moderna para sistema legado...");
+
+            var response = _legacySystem.AuthorizeTransaction(
+                request.CreditCardNumber,
+                int.Parse(request.Cvv),
+                request.ExpirationDate.Month,
+                request.ExpirationDate.Year,
+                (double)(request.Amount * 100), // legado usa centavos
+                request.CustomerEmail
+            );
+
+            return new PaymentResult
+            {
+                Success = response.ResponseCode == "00",
+                TransactionId = response.TransactionRef,
+                Message = response.ResponseMessage
+            };
+        }
+
+        public bool RefundPayment(string transactionId, decimal amount)
+        {
+            Console.WriteLine("[Adapter] Convertendo reembolso para sistema legado...");
+
+            return _legacySystem.ReverseTransaction(
+                transactionId,
+                (double)(amount * 100)
+            );
+        }
+
+        public PaymentStatus CheckStatus(string transactionId)
+        {
+            Console.WriteLine("[Adapter] Consultando status no sistema legado...");
+
+            var status = _legacySystem.QueryTransactionStatus(transactionId);
+
+            return status switch
+            {
+                "APPROVED" => PaymentStatus.Approved,
+                "DECLINED" => PaymentStatus.Declined,
+                "REFUNDED" => PaymentStatus.Refunded,
+                _ => PaymentStatus.Pending
+            };
+        }
+    }
+
     public class ModernPaymentProcessor : IPaymentProcessor
     {
         public PaymentResult ProcessPayment(PaymentRequest request)
         {
             Console.WriteLine("[Processador Moderno] Processando pagamento...");
+
             return new PaymentResult
             {
                 Success = true,
@@ -119,7 +161,6 @@ namespace DesignPatternChallenge
         }
     }
 
-    // Classe da aplicação que usa a interface moderna
     public class CheckoutService
     {
         private readonly IPaymentProcessor _paymentProcessor;
@@ -148,13 +189,9 @@ namespace DesignPatternChallenge
             var result = _paymentProcessor.ProcessPayment(request);
 
             if (result.Success)
-            {
                 Console.WriteLine($"✅ Pedido aprovado! ID: {result.TransactionId}");
-            }
             else
-            {
                 Console.WriteLine($"❌ Pagamento recusado: {result.Message}");
-            }
         }
     }
 
@@ -164,53 +201,29 @@ namespace DesignPatternChallenge
         {
             Console.WriteLine("=== Sistema de Checkout ===\n");
 
-            // Funciona bem com o processador moderno
+            // Usando processador moderno
             var modernProcessor = new ModernPaymentProcessor();
-            var checkoutWithModern = new CheckoutService(modernProcessor);
-            checkoutWithModern.CompleteOrder("cliente@email.com", 150.00m, "4111111111111111");
+            var checkoutModern = new CheckoutService(modernProcessor);
 
-            Console.WriteLine("\n" + new string('-', 60) + "\n");
-
-            // Problema: Como usar o sistema legado sem modificar CheckoutService?
-            var legacySystem = new LegacyPaymentSystem();
-            
-            // ISSO NÃO FUNCIONA - Interfaces incompatíveis
-            // var checkoutWithLegacy = new CheckoutService(legacySystem); // ERRO DE COMPILAÇÃO!
-
-            Console.WriteLine("⚠️ PROBLEMA: Sistema legado não implementa IPaymentProcessor");
-            Console.WriteLine("   - Assinaturas de métodos incompatíveis");
-            Console.WriteLine("   - Estruturas de dados diferentes");
-            Console.WriteLine("   - Não podemos modificar o código legado");
-            Console.WriteLine("   - Não queremos modificar CheckoutService");
-
-            // Tentativa ingênua: criar wrapper manualmente em cada lugar
-            Console.WriteLine("\n--- Tentativa de uso direto (código duplicado) ---\n");
-            
-            var cardNumber = "4111111111111111";
-            var cvv = 123;
-            var expDate = new DateTime(2026, 12, 31);
-            var amount = 200.00m;
-
-            // Conversões manuais repetidas em cada lugar do código
-            var legacyResponse = legacySystem.AuthorizeTransaction(
-                cardNumber,
-                cvv,
-                expDate.Month,
-                expDate.Year,
-                (double)(amount * 100),
-                "cliente2@email.com"
+            checkoutModern.CompleteOrder(
+                "cliente@email.com",
+                150.00m,
+                "4111111111111111"
             );
 
-            if (legacyResponse.ResponseCode == "00")
-            {
-                Console.WriteLine($"✅ Transação aprovada! Ref: {legacyResponse.TransactionRef}");
-            }
+            Console.WriteLine("\n" + new string('-', 50));
 
-            // Perguntas para reflexão:
-            // - Como fazer o sistema legado trabalhar com a interface moderna?
-            // - Como evitar modificar CheckoutService e outras classes que usam IPaymentProcessor?
-            // - Como encapsular as conversões entre as interfaces incompatíveis?
-            // - Como permitir que ambos os sistemas coexistam de forma transparente?
+            // Usando sistema legado via Adapter
+            var legacySystem = new LegacyPaymentSystem();
+            var legacyAdapter = new LegacyPaymentAdapter(legacySystem);
+
+            var checkoutLegacy = new CheckoutService(legacyAdapter);
+
+            checkoutLegacy.CompleteOrder(
+                "cliente2@email.com",
+                200.00m,
+                "4111111111111111"
+            );
         }
     }
 }
